@@ -1,4 +1,4 @@
-# Quant Sports Edge Lab
+# Sports Prediction
 
 Sports prediction and market-implied probability analytics in Python.
 
