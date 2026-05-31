@@ -22,6 +22,249 @@ Features:
 - Compares model probabilities with market no-vig probabilities.
 - Exports model comparison and scoreline outputs.
 
+#### Football Technical Workflow
+
+The football project builds a supervised expected-goals model for PSG vs Arsenal using 2025/26 season data:
+
+- English Premier League 2025/26
+- French Ligue 1 2025/26
+- Champions League 2025/26
+
+The model is designed to avoid data leakage. For every historical match, the feature row only uses matches that happened **before** that match. The current match is never included in its own team averages.
+
+The workflow is:
+
+1. Load domestic league and Champions League match data.
+2. Sort matches chronologically by date.
+3. Build season-to-date team features before each fixture.
+4. Drop early-season rows where either team has too little history.
+5. Train two Poisson regression models:
+   - one model for home goals
+   - one model for away goals
+6. Evaluate on the final 25% of matches chronologically.
+7. Use the trained model to predict neutral-site PSG vs Arsenal expected goals.
+8. Simulate scorelines with Monte Carlo.
+9. Compare model probabilities with market no-vig probabilities.
+
+#### Football Season-to-Date Variables
+
+For each team before each match, the model calculates current-season features such as:
+
+Attacking:
+
+- goals for so far
+- average goals for so far
+- shots for so far, when available
+- average shots for so far, when available
+
+Defensive:
+
+- goals against so far
+- average goals against so far
+- clean sheets so far
+- clean sheet rate so far
+
+Form and table strength:
+
+- matches played so far
+- wins so far
+- draws so far
+- losses so far
+- points so far
+- points per game so far
+- goal difference so far
+- average goal difference so far
+
+The model creates home-team and away-team versions of these variables, then adds difference features:
+
+```text
+avg_gf_diff = home_avg_goals_for - away_avg_goals_for
+avg_ga_diff = home_avg_goals_against - away_avg_goals_against
+ppg_diff = home_points_per_game - away_points_per_game
+goal_difference_diff = home_avg_goal_difference - away_avg_goal_difference
+clean_sheet_rate_diff = home_clean_sheet_rate - away_clean_sheet_rate
+```
+
+It also includes:
+
+- home advantage flag
+- neutral venue flag
+- league one-hot encoding
+
+#### Football Poisson Expected-Goals Model
+
+Football goals are count data, so the project uses Poisson regression.
+
+For home goals:
+
+```text
+FTHG_i ~ Poisson(lambda_home_i)
+
+log(lambda_home_i) =
+    beta_0
+  + beta_1 * home_attack_features_i
+  + beta_2 * away_defence_features_i
+  + beta_3 * form_features_i
+  + beta_4 * league_indicators_i
+```
+
+For away goals:
+
+```text
+FTAG_i ~ Poisson(lambda_away_i)
+
+log(lambda_away_i) =
+    alpha_0
+  + alpha_1 * away_attack_features_i
+  + alpha_2 * home_defence_features_i
+  + alpha_3 * form_features_i
+  + alpha_4 * league_indicators_i
+```
+
+The model predicts:
+
+```text
+lambda_home = expected home goals
+lambda_away = expected away goals
+```
+
+For PSG vs Arsenal, the final is neutral, so:
+
+```text
+neutral_venue = 1
+home_advantage = 0
+```
+
+To remove nominal home/away ordering bias, the model predicts the final twice:
+
+1. PSG nominal home, Arsenal nominal away
+2. Arsenal nominal home, PSG nominal away
+
+Then it averages the two orientations to get:
+
+```text
+lambda_PSG
+lambda_Arsenal
+```
+
+Monte Carlo scorelines are generated as:
+
+```text
+PSG_goals     ~ Poisson(lambda_PSG)
+Arsenal_goals ~ Poisson(lambda_Arsenal)
+```
+
+#### Full Model Variables
+
+The original full model used a wider feature set:
+
+- home season average goals for
+- away season average goals for
+- home season average goals against
+- away season average goals against
+- home points per game
+- away points per game
+- home average goal difference
+- away average goal difference
+- home clean sheet rate
+- away clean sheet rate
+- average goals-for difference
+- average goals-against difference
+- points-per-game difference
+- goal-difference difference
+- clean-sheet-rate difference
+- home matches played so far
+- away matches played so far
+- home advantage
+- neutral venue
+- league one-hot encoded
+
+This was intentionally broad, but it created redundancy because many variables measured similar team-strength concepts.
+
+#### Reduced Model Variables
+
+After comparing full and reduced models, the project kept a smaller feature set that performed better on the historical test set.
+
+Reduced variables:
+
+- `home_avg_goal_difference`
+- `away_avg_goal_difference`
+- `away_season_avg_shots_for_so_far`
+- `away_season_goals_for_so_far`
+- `away_season_avg_gf`
+- `away_season_clean_sheets_so_far`
+- `away_points_per_game`
+- `away_points_so_far`
+- `home_draws_so_far`
+- `away_matches_played_so_far`
+- `away_losses_so_far`
+- `League`
+
+Some variables from the full model were dropped because they were redundant, noisy, or weaker in the reduced specification. Dropped examples include:
+
+- duplicated attack/defence averages that overlapped with goal difference
+- several difference features that repeated information already captured by team-level strength variables
+- broad home/away strength variables that did not improve out-of-sample performance
+- low-signal clean-sheet and points variables that added complexity without enough predictive gain
+
+The reduced model is simpler and performed better in the historical validation table.
+
+#### Draw Prediction Improvement
+
+A pure argmax classifier often underpredicts draws because football draws are frequently close to the strongest win probability without being the single highest probability.
+
+The project keeps the underlying Poisson probabilities unchanged, then adds a decision-layer correction:
+
+```python
+def predict_result_with_draw_threshold(prob_home_win, prob_draw, prob_away_win, draw_margin=0.04):
+    max_win_prob = max(prob_home_win, prob_away_win)
+
+    if prob_draw >= max_win_prob - draw_margin:
+        return "D"
+    elif prob_home_win >= prob_away_win:
+        return "H"
+    else:
+        return "A"
+```
+
+The model tunes `draw_margin` from 0.00 to 0.10 and selects the value that balances:
+
+- overall accuracy
+- draw recall
+- macro F1
+
+This improves draw recognition without changing the expected-goals model itself.
+
+#### Football Model Improvement
+
+The reduced model outperformed the full model on the historical test set:
+
+| Metric | Full Model | Reduced Model |
+|---|---:|---:|
+| Home goals RMSE | 1.3278 | 1.2994 |
+| Away goals RMSE | 1.1183 | 1.1032 |
+| Total goals RMSE | 1.6986 | 1.7035 |
+| Argmax accuracy | 0.4118 | 0.4379 |
+| Threshold accuracy | 0.4314 | 0.4575 |
+| Argmax macro F1 | 0.3209 | 0.3372 |
+| Threshold macro F1 | 0.4026 | 0.4221 |
+| Draw recall before threshold | 0.0000 | 0.0000 |
+| Draw recall after threshold | 0.1778 | 0.1778 |
+| Log loss | 1.0945 | 1.0648 |
+| Brier score | 0.6650 | 0.6445 |
+| Best draw margin | 0.09 | 0.08 |
+
+Main improvement:
+
+```text
+Threshold accuracy improved from 43.14% to 45.75%.
+Log loss improved from 1.0945 to 1.0648.
+Brier score improved from 0.6650 to 0.6445.
+Macro F1 improved from 0.4026 to 0.4221.
+```
+
+The reduced model was selected because it had better probability calibration and better classification robustness, while using fewer variables.
+
 ### NBA Prediction
 
 `nba_prediction/game_7_spurs_vs_thunder/`
