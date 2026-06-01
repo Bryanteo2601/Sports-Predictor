@@ -209,6 +209,8 @@ Some variables from the full model were dropped because they were redundant, noi
 
 The reduced model is simpler and performed better in the historical validation table.
 
+Full R robustness evidence, including the important code excerpts and exported results, is documented in `football_prediction/README.md`.
+
 #### Draw Prediction Improvement
 
 A pure argmax classifier often underpredicts draws because football draws are frequently close to the strongest win probability without being the single highest probability.
