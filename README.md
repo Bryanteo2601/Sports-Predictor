@@ -44,7 +44,7 @@ Features:
 - Downloads/caches historical men's international match results.
 - Uses World Cup, Euros, Copa America, AFCON, Asian Cup, Gold Cup, Nations League, qualifiers, and down-weighted friendlies.
 - Builds no-leakage pre-match rolling features and Elo-style ratings.
-- Trains Poisson goal models, backtests Euro 2024, and runs a trained-model World Cup forecast.
+- Trains Poisson goal models, backtests recent major competitions by region, and runs a trained-model World Cup forecast.
 
 #### Football Technical Workflow
 

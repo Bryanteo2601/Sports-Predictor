@@ -54,7 +54,10 @@ The trained model:
 - uses World Cup, Euros, Copa America, AFCON, Asian Cup, Gold Cup, Nations League, qualifiers, and down-weighted friendlies
 - builds no-leakage pre-match rolling features and Elo-style ratings
 - trains Poisson goal models
-- backtests on Euro 2024
+- backtests recent major competitions by region: World Cup, Euro, Copa America, AFCON, Asian Cup, Gold Cup, UEFA Nations League, CONCACAF Nations League, and World Cup qualifiers
+- also keeps a specific Euro 2024 backtest output
+- exports `outputs/trained_international_competition_backtest_metrics.csv`
+- exports `outputs/trained_international_competition_backtest_predictions.csv`
 - exports `outputs/trained_international_euro_2024_metrics.csv`
 - exports `outputs/trained_world_cup_2026_summary.csv`
 

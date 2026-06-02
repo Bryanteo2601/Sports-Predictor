@@ -88,6 +88,72 @@ COMPETITION_WEIGHTS = {
 
 MODEL_TOURNAMENTS = set(COMPETITION_WEIGHTS)
 
+COMPETITION_BACKTESTS = [
+    {
+        "name": "World Cup 2022",
+        "region": "Global",
+        "tournament": "FIFA World Cup",
+        "start": "2022-11-20",
+        "end": "2022-12-18",
+    },
+    {
+        "name": "Euro 2024",
+        "region": "UEFA",
+        "tournament": "UEFA Euro",
+        "start": "2024-06-14",
+        "end": "2024-07-14",
+    },
+    {
+        "name": "Copa America 2024",
+        "region": "CONMEBOL",
+        "tournament": "Copa América",
+        "start": "2024-06-20",
+        "end": "2024-07-14",
+    },
+    {
+        "name": "AFCON 2025",
+        "region": "CAF",
+        "tournament": "African Cup of Nations",
+        "start": "2025-12-21",
+        "end": "2026-01-18",
+    },
+    {
+        "name": "Asian Cup 2023",
+        "region": "AFC",
+        "tournament": "AFC Asian Cup",
+        "start": "2024-01-12",
+        "end": "2024-02-10",
+    },
+    {
+        "name": "Gold Cup 2025",
+        "region": "CONCACAF",
+        "tournament": "Gold Cup",
+        "start": "2025-06-14",
+        "end": "2025-07-06",
+    },
+    {
+        "name": "UEFA Nations League 2024/25",
+        "region": "UEFA",
+        "tournament": "UEFA Nations League",
+        "start": "2024-09-05",
+        "end": "2025-06-08",
+    },
+    {
+        "name": "CONCACAF Nations League 2024/25",
+        "region": "CONCACAF",
+        "tournament": "CONCACAF Nations League",
+        "start": "2024-09-04",
+        "end": "2025-03-23",
+    },
+    {
+        "name": "World Cup 2026 Qualifiers",
+        "region": "Global qualifiers",
+        "tournament": "FIFA World Cup qualification",
+        "start": "2023-09-07",
+        "end": "2026-03-31",
+    },
+]
+
 TEAM_NAME_ALIASES = {
     "Turkey": "Turkey",
     "Türkiye": "Turkey",
@@ -440,6 +506,102 @@ def backtest_euro_2024(feature_data: pd.DataFrame) -> tuple[pd.DataFrame, pd.Dat
     return euro, metrics, home_model, away_model
 
 
+def predict_match_rows(df: pd.DataFrame, home_model: Pipeline, away_model: Pipeline) -> pd.DataFrame:
+    predicted = df.copy()
+    X = predicted[NUMERIC_FEATURES + CATEGORICAL_FEATURES]
+    predicted["pred_home_goals"] = home_model.predict(X)
+    predicted["pred_away_goals"] = away_model.predict(X)
+    probabilities = [
+        poisson_result_probabilities(float(h), float(a))
+        for h, a in zip(predicted["pred_home_goals"], predicted["pred_away_goals"])
+    ]
+    predicted[["p_home", "p_draw", "p_away"]] = pd.DataFrame(probabilities, index=predicted.index)
+    predicted["predicted_result"] = (
+        predicted[["p_home", "p_draw", "p_away"]]
+        .idxmax(axis=1)
+        .str.replace("p_", "")
+        .map({"home": "H", "draw": "D", "away": "A"})
+    )
+    return predicted
+
+
+def backtest_competition_window(feature_data: pd.DataFrame, spec: dict[str, str]) -> tuple[pd.DataFrame, dict[str, float | str]]:
+    start = pd.Timestamp(spec["start"])
+    end = pd.Timestamp(spec["end"])
+    train_mask = feature_data["date"].lt(start)
+    test_mask = (
+        feature_data["tournament"].eq(spec["tournament"])
+        & feature_data["date"].between(start, end, inclusive="both")
+    )
+
+    test = feature_data[test_mask].copy()
+    if test.empty:
+        metrics: dict[str, float | str] = {
+            "competition": spec["name"],
+            "region": spec["region"],
+            "tournament": spec["tournament"],
+            "start": spec["start"],
+            "end": spec["end"],
+            "matches": 0.0,
+            "home_goals_rmse": np.nan,
+            "away_goals_rmse": np.nan,
+            "result_accuracy": np.nan,
+            "multiclass_log_loss": np.nan,
+            "brier_score": np.nan,
+        }
+        return test, metrics
+
+    home_model, away_model = train_models(feature_data, train_mask)
+    predictions = predict_match_rows(test, home_model, away_model)
+    metrics = evaluate_predictions(
+        predictions,
+        predictions["pred_home_goals"].to_numpy(),
+        predictions["pred_away_goals"].to_numpy(),
+    )
+    metrics.update(
+        {
+            "competition": spec["name"],
+            "region": spec["region"],
+            "tournament": spec["tournament"],
+            "start": spec["start"],
+            "end": spec["end"],
+        }
+    )
+    return predictions, metrics
+
+
+def backtest_major_competitions(feature_data: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    prediction_frames = []
+    metric_rows = []
+
+    for spec in COMPETITION_BACKTESTS:
+        print(f"Backtesting {spec['name']}...")
+        predictions, metrics = backtest_competition_window(feature_data, spec)
+        if not predictions.empty:
+            predictions = predictions.copy()
+            predictions["backtest_competition"] = spec["name"]
+            predictions["backtest_region"] = spec["region"]
+            prediction_frames.append(predictions)
+        metric_rows.append(metrics)
+
+    all_predictions = pd.concat(prediction_frames, ignore_index=True) if prediction_frames else pd.DataFrame()
+    metrics = pd.DataFrame(metric_rows)
+    ordered_columns = [
+        "competition",
+        "region",
+        "tournament",
+        "start",
+        "end",
+        "matches",
+        "home_goals_rmse",
+        "away_goals_rmse",
+        "result_accuracy",
+        "multiclass_log_loss",
+        "brier_score",
+    ]
+    return all_predictions, metrics[ordered_columns]
+
+
 def latest_state_snapshot(results: pd.DataFrame, cutoff_date: pd.Timestamp = WORLD_CUP_2026_START) -> tuple[pd.DataFrame, dict[str, TeamState]]:
     cutoff_results = results[results["date"].lt(cutoff_date)].copy()
     return build_feature_dataset(cutoff_results)
@@ -713,6 +875,12 @@ def main() -> None:
     feature_data, _ = build_feature_dataset(results)
     feature_data.to_csv(OUTPUT_DIR / "trained_international_feature_data.csv", index=False)
     print(f"Feature rows: {len(feature_data):,}")
+
+    print("Backtesting major international competitions by region...")
+    competition_predictions, competition_metrics = backtest_major_competitions(feature_data)
+    competition_predictions.to_csv(OUTPUT_DIR / "trained_international_competition_backtest_predictions.csv", index=False)
+    competition_metrics.to_csv(OUTPUT_DIR / "trained_international_competition_backtest_metrics.csv", index=False)
+    print(competition_metrics.to_string(index=False))
 
     print("Training on pre-Euro 2024 matches and backtesting Euro 2024...")
     euro_predictions, euro_metrics, _, _ = backtest_euro_2024(feature_data)
