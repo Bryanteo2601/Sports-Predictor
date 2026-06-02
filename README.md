@@ -35,6 +35,17 @@ Features:
 - Exports detailed probability tables and supports knockout-tree and high-speed simulation visualizations.
 - Labels decimal-odds calculations as total return vs net profit to avoid payout confusion.
 
+`football_prediction/trained_international_model.py`
+
+Trained national-team model using historical international results.
+
+Features:
+
+- Downloads/caches historical men's international match results.
+- Uses World Cup, Euros, Copa America, AFCON, Asian Cup, Gold Cup, Nations League, qualifiers, and down-weighted friendlies.
+- Builds no-leakage pre-match rolling features and Elo-style ratings.
+- Trains Poisson goal models, backtests Euro 2024, and runs a trained-model World Cup forecast.
+
 #### Football Technical Workflow
 
 The football project builds a supervised expected-goals model for PSG vs Arsenal using 2025/26 season data:

@@ -42,6 +42,22 @@ Create the high-speed 10,000-simulation animation:
 python3 football_prediction/animate_world_cup_simulation.py
 ```
 
+Train a national-team machine-learning model on historical international results, backtest Euro 2024, and run a trained-model World Cup forecast:
+
+```bash
+python3 football_prediction/trained_international_model.py
+```
+
+The trained model:
+
+- downloads/caches historical men's international results from `martj42/international_results`
+- uses World Cup, Euros, Copa America, AFCON, Asian Cup, Gold Cup, Nations League, qualifiers, and down-weighted friendlies
+- builds no-leakage pre-match rolling features and Elo-style ratings
+- trains Poisson goal models
+- backtests on Euro 2024
+- exports `outputs/trained_international_euro_2024_metrics.csv`
+- exports `outputs/trained_world_cup_2026_summary.csv`
+
 Decimal odds note:
 
 ```text
