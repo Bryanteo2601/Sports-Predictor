@@ -51,12 +51,12 @@ def _market_group(row: pd.Series) -> str:
 
 
 def prepare_optimizer_data(market_edges: pd.DataFrame, ranked_markets: pd.DataFrame | None = None) -> pd.DataFrame:
-    """Add EV, Kelly, uncertainty, and conflict-group columns."""
+    """Add net-profit EV, Kelly, uncertainty, and conflict-group columns."""
 
     data = market_edges.copy().reset_index(drop=True)
     data["selection_id"] = np.arange(len(data))
     data["game_id"] = "Spurs_vs_Thunder_Game7"
-    data["expected_value"] = data["expected_value_per_1"]
+    data["expected_value"] = data["expected_net_profit_per_1"]
 
     if ranked_markets is not None and not ranked_markets.empty:
         uncertainty_cols = [
@@ -181,7 +181,7 @@ def extract_solution(data: pd.DataFrame, model, x: dict, stake: dict, settings: 
         row["objective_ev_used"] = row[obj_col]
         row["expected_profit"] = stake_value * row["expected_value"]
         row["reason"] = (
-            f"Passed edge/EV filters; {settings.objective_mode}={row[obj_col]:.4f}; "
+            f"Passed edge/net-profit filters; {settings.objective_mode}={row[obj_col]:.4f}; "
             f"edge={row['edge']:.4f}; Kelly cap respected."
         )
         selected_rows.append(row)
@@ -245,7 +245,7 @@ def _fallback_greedy(data: pd.DataFrame, settings: OptimizerSettings, warning: s
         out["expected_profit"] = stake_value * row["expected_value"]
         out["reason"] = (
             f"Greedy fallback selected highest available {settings.objective_mode}; "
-            f"edge={row['edge']:.4f}; EV={row['expected_value']:.4f}; no group conflict."
+            f"edge={row['edge']:.4f}; net_profit_per_$1={row['expected_value']:.4f}; no group conflict."
         )
         selected.append(out)
 

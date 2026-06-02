@@ -10,6 +10,44 @@ Run:
 python3 champions_league_prediction.py
 ```
 
+## FIFA World Cup 2026 Simulator
+
+`world_cup_2026_simulator.py` runs a 48-team FIFA World Cup 2026 model from group stage through the final.
+
+It includes:
+
+- 12 groups of 4 teams
+- top 2 group qualification plus the 8 best third-place teams
+- Round of 32 through final bracket logic
+- regional qualifier and confederation competition context
+- travel, rest days, host advantage, squad quality, injuries, and market odds
+- 10,000-run terminal projection with group-stage, knockout-stage, and title probabilities
+- contender-value comparison using decimal odds, with total return and net profit labeled separately
+
+Run from the repository root:
+
+```bash
+python3 football_prediction/world_cup_2026_simulator.py
+```
+
+Create the latest simulated knockout tree:
+
+```bash
+python3 football_prediction/plot_world_cup_bracket.py
+```
+
+Create the high-speed 10,000-simulation animation:
+
+```bash
+python3 football_prediction/animate_world_cup_simulation.py
+```
+
+Decimal odds note:
+
+```text
+Odds 9.00 means a $1 winning stake returns $9 total, for $8 net profit.
+```
+
 ## Robustness Checks
 
 The football model was checked with three separate R validation scripts:

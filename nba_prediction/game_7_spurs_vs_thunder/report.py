@@ -70,14 +70,17 @@ def print_summary(market_edges: pd.DataFrame, run_summaries: pd.DataFrame, warni
         "no_vig_probability",
         "model_probability",
         "edge",
-        "expected_value_per_1",
+        "expected_total_return_per_1",
+        "expected_net_profit_per_1",
         "edge_label",
     ]
     print(market_edges[cols].head(10).to_string(index=False))
 
     best = market_edges.iloc[0]
-    print("\nStrongest paper-trade candidate by model EV:")
+    print("\nStrongest paper-trade candidate by model net profit:")
     print(
         f"{best['market_type']} | {best['selection']} | line={best['line']} | "
-        f"EV={best['expected_value_per_1']:.3f} | edge={best['edge']:.3f}"
+        f"expected_total_return_per_$1={best['expected_total_return_per_1']:.3f} | "
+        f"expected_net_profit_per_$1={best['expected_net_profit_per_1']:.3f} | "
+        f"edge={best['edge']:.3f}"
     )

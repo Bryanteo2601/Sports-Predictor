@@ -22,6 +22,19 @@ Features:
 - Compares model probabilities with market no-vig probabilities.
 - Exports model comparison and scoreline outputs.
 
+`football_prediction/world_cup_2026_simulator.py`
+
+FIFA World Cup 2026 tournament simulator and Monte Carlo projection.
+
+Features:
+
+- Models the 48-team World Cup format with 12 groups and a 32-team knockout stage.
+- Applies top-two group qualification plus the 8 best third-place qualifiers.
+- Adds World Cup-specific context: regional qualifiers, confederation competitions, travel, rest days, host advantage, squad quality, injuries, and outright winner odds.
+- Prints a 10,000-simulation tournament breakdown in the terminal.
+- Exports detailed probability tables and supports knockout-tree and high-speed simulation visualizations.
+- Labels decimal-odds calculations as total return vs net profit to avoid payout confusion.
+
 #### Football Technical Workflow
 
 The football project builds a supervised expected-goals model for PSG vs Arsenal using 2025/26 season data:

@@ -75,7 +75,12 @@ def evaluate_markets(sim: pd.DataFrame, odds: pd.DataFrame) -> pd.DataFrame:
             None if pd.isna(row["line"]) else row["line"],
         )
         loss_probability = 1 - model_probability - push_probability
-        expected_value = model_probability * (row["odds_decimal"] - 1) - loss_probability
+        # Decimal odds include the returned stake. Example: odds 9.00 means a
+        # $1 winning bet returns $9 total, for $8 net profit.
+        expected_total_return_per_1 = (
+            model_probability * row["odds_decimal"] + push_probability
+        )
+        expected_net_profit_per_1 = expected_total_return_per_1 - 1
         edge = model_probability - row["no_vig_probability"]
 
         rows.append(
@@ -89,7 +94,9 @@ def evaluate_markets(sim: pd.DataFrame, odds: pd.DataFrame) -> pd.DataFrame:
                 "model_probability": model_probability,
                 "push_probability": push_probability,
                 "edge": edge,
-                "expected_value_per_1": expected_value,
+                "expected_total_return_per_1": expected_total_return_per_1,
+                "expected_net_profit_per_1": expected_net_profit_per_1,
+                "expected_value_per_1": expected_net_profit_per_1,
             }
         )
 
@@ -99,4 +106,4 @@ def evaluate_markets(sim: pd.DataFrame, odds: pd.DataFrame) -> pd.DataFrame:
         bins=[-np.inf, 0.01, 0.04, 0.08, np.inf],
         labels=["no-play/negative", "weak edge", "moderate edge", "strong edge"],
     )
-    return result.sort_values(["expected_value_per_1", "edge"], ascending=False).reset_index(drop=True)
+    return result.sort_values(["expected_net_profit_per_1", "edge"], ascending=False).reset_index(drop=True)
