@@ -55,6 +55,8 @@ DATA_DIR.mkdir(exist_ok=True)
 
 RESULTS_URL = "https://raw.githubusercontent.com/martj42/international_results/master/results.csv"
 RESULTS_PATH = DATA_DIR / "international_results.csv"
+AVAILABILITY_PATH = DATA_DIR / "current_availability_adjustments.csv"
+SCRIPT_AVAILABILITY_PATH = Path(__file__).resolve().parent / "data" / "current_availability_adjustments.csv"
 
 RANDOM_SEED = 42
 MAX_GOALS_FOR_PROBABILITY_GRID = 10
@@ -68,16 +70,7 @@ HOST_TEAM_COUNTRY = {
     "Canada": "Canada",
 }
 
-CURRENT_AVAILABILITY_ADJUSTMENTS = {
-    # Transparent live-news overlay. These are deliberately small multipliers
-    # applied after the trained model predicts xG, because the trained model
-    # itself does not know current squad availability.
-    "Spain": {
-        "attack_multiplier": 0.965,
-        "opponent_attack_multiplier": 1.005,
-        "note": "Fermin Lopez ruled out with a right-foot fifth-metatarsal fracture; Lamine Yamal reported expected fit but returning from a hamstring issue.",
-    },
-}
+_CURRENT_AVAILABILITY_CACHE: dict[str, dict[str, object]] | None = None
 
 COMPETITION_WEIGHTS = {
     "FIFA World Cup": 1.50,
@@ -226,6 +219,48 @@ def load_international_results(refresh: bool = False) -> pd.DataFrame:
     df["away_score"] = df["away_score"].astype(int)
     df = df.sort_values(["date", "home_team", "away_team"]).reset_index(drop=True)
     return df
+
+
+def load_current_availability_adjustments(refresh: bool = False) -> dict[str, dict[str, object]]:
+    global _CURRENT_AVAILABILITY_CACHE
+    if _CURRENT_AVAILABILITY_CACHE is not None and not refresh:
+        return _CURRENT_AVAILABILITY_CACHE
+
+    adjustments: dict[str, dict[str, object]] = {}
+    availability_path = AVAILABILITY_PATH if AVAILABILITY_PATH.exists() else SCRIPT_AVAILABILITY_PATH
+    if not availability_path.exists():
+        _CURRENT_AVAILABILITY_CACHE = adjustments
+        return adjustments
+
+    availability = pd.read_csv(availability_path).fillna("")
+    for _, row in availability.iterrows():
+        team_name = str(row.get("team", "")).strip()
+        if not team_name:
+            continue
+
+        team_adjustment = adjustments.setdefault(
+            team_name,
+            {
+                "attack_multiplier": 1.0,
+                "opponent_attack_multiplier": 1.0,
+                "notes": [],
+            },
+        )
+        attack_multiplier = float(row.get("attack_multiplier", 1.0) or 1.0)
+        opponent_attack_multiplier = float(row.get("opponent_attack_multiplier", 1.0) or 1.0)
+        team_adjustment["attack_multiplier"] = float(team_adjustment["attack_multiplier"]) * attack_multiplier
+        team_adjustment["opponent_attack_multiplier"] = float(team_adjustment["opponent_attack_multiplier"]) * opponent_attack_multiplier
+
+        player = str(row.get("player", "")).strip()
+        status = str(row.get("status", "")).strip()
+        note = str(row.get("note", "")).strip()
+        source = str(row.get("source", "")).strip()
+        note_parts = [part for part in [player, status, note, source] if part]
+        if note_parts:
+            team_adjustment["notes"].append(" | ".join(note_parts))
+
+    _CURRENT_AVAILABILITY_CACHE = adjustments
+    return adjustments
 
 
 def tournament_category(tournament: str) -> str:
@@ -656,8 +691,9 @@ def trained_expected_goals(home_model: Pipeline, away_model: Pipeline, states: d
 
 
 def apply_current_availability_adjustments(team_1_name: str, team_2_name: str, lambda_1: float, lambda_2: float) -> tuple[float, float]:
-    team_1_adjustment = CURRENT_AVAILABILITY_ADJUSTMENTS.get(team_1_name, {})
-    team_2_adjustment = CURRENT_AVAILABILITY_ADJUSTMENTS.get(team_2_name, {})
+    current_availability_adjustments = load_current_availability_adjustments()
+    team_1_adjustment = current_availability_adjustments.get(team_1_name, {})
+    team_2_adjustment = current_availability_adjustments.get(team_2_name, {})
 
     lambda_1 *= float(team_1_adjustment.get("attack_multiplier", 1.0))
     lambda_2 *= float(team_2_adjustment.get("attack_multiplier", 1.0))
@@ -667,19 +703,22 @@ def apply_current_availability_adjustments(team_1_name: str, team_2_name: str, l
 
 
 def print_current_availability_notes() -> None:
-    if not CURRENT_AVAILABILITY_ADJUSTMENTS:
+    current_availability_adjustments = load_current_availability_adjustments()
+    if not current_availability_adjustments:
         print("Current availability overlay: none.")
         return
 
-    print("Current availability overlay:")
-    for team_name, adjustment in sorted(CURRENT_AVAILABILITY_ADJUSTMENTS.items()):
+    availability_path = AVAILABILITY_PATH if AVAILABILITY_PATH.exists() else SCRIPT_AVAILABILITY_PATH
+    print(f"Current availability overlay from {availability_path}:")
+    for team_name, adjustment in sorted(current_availability_adjustments.items()):
         attack_multiplier = float(adjustment.get("attack_multiplier", 1.0))
         opponent_attack_multiplier = float(adjustment.get("opponent_attack_multiplier", 1.0))
-        note = str(adjustment.get("note", "No note provided."))
         print(
             f"  - {team_name}: attack x {attack_multiplier:.3f}, "
-            f"opponent attack x {opponent_attack_multiplier:.3f}. {note}"
+            f"opponent attack x {opponent_attack_multiplier:.3f}"
         )
+        for note in adjustment.get("notes", []):
+            print(f"      {note}")
 
 
 def simulate_trained_match(
