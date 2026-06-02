@@ -559,6 +559,34 @@ objective_mode = conservative_ev
 
 The optimizer outputs selected markets, stake allocation, expected paper profit, expected ROI, total stake used, unused bankroll, average edge, average EV, and selection rationale. If Gurobi is unavailable, the project prints a warning and uses a deterministic greedy fallback optimizer.
 
+## ROC/AUC Backtest
+
+Run the AUC backtest script from the repository root:
+
+```bash
+python3 roc_auc_backtest.py
+```
+
+The script plots true positive rate against false positive rate and writes:
+
+- `outputs/football_roc_auc.png`
+- `outputs/nba_roc_auc.png`
+- `outputs/roc_auc_summary.csv`
+
+Latest AUC results:
+
+| Sport | Target | Sample size | AUC | AUC < 0.5 |
+|---|---:|---:|---:|---|
+| Football | Home win | 172 | 0.6654 | No |
+| Football | Draw | 172 | 0.5685 | No |
+| Football | Away win | 172 | 0.6371 | No |
+| Football | Micro average | 516 | 0.6449 | No |
+| Football | Macro average | 172 | 0.6237 | No |
+| NBA | Home win | 1,338 | 0.7252 | No |
+| NBA | Away win | 1,338 | 0.7252 | No |
+
+Football uses the model's outcome probability columns (`P_HomeWin`, `P_Draw`, `P_AwayWin`) for one-vs-rest ROC curves. NBA uses `predicted_home_margin` for home win and `-predicted_home_margin` for away win, because the NBA backtest stores margin scores rather than calibrated win probabilities.
+
 ## Install
 
 ```bash
