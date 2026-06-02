@@ -68,6 +68,17 @@ HOST_TEAM_COUNTRY = {
     "Canada": "Canada",
 }
 
+CURRENT_AVAILABILITY_ADJUSTMENTS = {
+    # Transparent live-news overlay. These are deliberately small multipliers
+    # applied after the trained model predicts xG, because the trained model
+    # itself does not know current squad availability.
+    "Spain": {
+        "attack_multiplier": 0.965,
+        "opponent_attack_multiplier": 1.005,
+        "note": "Fermin Lopez ruled out with a right-foot fifth-metatarsal fracture; Lamine Yamal reported expected fit but returning from a hamstring issue.",
+    },
+}
+
 COMPETITION_WEIGHTS = {
     "FIFA World Cup": 1.50,
     "UEFA Euro": 1.40,
@@ -639,7 +650,36 @@ def blank_match_row(team_1: Team, team_2: Team, states: dict[str, TeamState], ma
 def trained_expected_goals(home_model: Pipeline, away_model: Pipeline, states: dict[str, TeamState], team_1: Team, team_2: Team, match_date: pd.Timestamp, country: str) -> tuple[float, float]:
     row = blank_match_row(team_1, team_2, states, match_date, "FIFA World Cup", neutral=True, country=country)
     X = row[NUMERIC_FEATURES + CATEGORICAL_FEATURES]
-    return float(home_model.predict(X)[0]), float(away_model.predict(X)[0])
+    lambda_1 = float(home_model.predict(X)[0])
+    lambda_2 = float(away_model.predict(X)[0])
+    return apply_current_availability_adjustments(team_1.name, team_2.name, lambda_1, lambda_2)
+
+
+def apply_current_availability_adjustments(team_1_name: str, team_2_name: str, lambda_1: float, lambda_2: float) -> tuple[float, float]:
+    team_1_adjustment = CURRENT_AVAILABILITY_ADJUSTMENTS.get(team_1_name, {})
+    team_2_adjustment = CURRENT_AVAILABILITY_ADJUSTMENTS.get(team_2_name, {})
+
+    lambda_1 *= float(team_1_adjustment.get("attack_multiplier", 1.0))
+    lambda_2 *= float(team_2_adjustment.get("attack_multiplier", 1.0))
+    lambda_2 *= float(team_1_adjustment.get("opponent_attack_multiplier", 1.0))
+    lambda_1 *= float(team_2_adjustment.get("opponent_attack_multiplier", 1.0))
+    return max(0.05, lambda_1), max(0.05, lambda_2)
+
+
+def print_current_availability_notes() -> None:
+    if not CURRENT_AVAILABILITY_ADJUSTMENTS:
+        print("Current availability overlay: none.")
+        return
+
+    print("Current availability overlay:")
+    for team_name, adjustment in sorted(CURRENT_AVAILABILITY_ADJUSTMENTS.items()):
+        attack_multiplier = float(adjustment.get("attack_multiplier", 1.0))
+        opponent_attack_multiplier = float(adjustment.get("opponent_attack_multiplier", 1.0))
+        note = str(adjustment.get("note", "No note provided."))
+        print(
+            f"  - {team_name}: attack x {attack_multiplier:.3f}, "
+            f"opponent attack x {opponent_attack_multiplier:.3f}. {note}"
+        )
 
 
 def simulate_trained_match(
@@ -892,6 +932,7 @@ def main() -> None:
     final_train_mask = feature_data["date"].lt(WORLD_CUP_2026_START)
     home_model, away_model = train_models(feature_data, final_train_mask)
     _, final_states = latest_state_snapshot(results, WORLD_CUP_2026_START)
+    print_current_availability_notes()
 
     n_simulations = int(os.getenv("TRAINED_WC_SIMULATIONS", "5000"))
     print(f"Running trained-model World Cup forecast ({n_simulations:,} tournaments)...")
