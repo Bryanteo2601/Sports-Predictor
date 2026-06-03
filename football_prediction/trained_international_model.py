@@ -39,11 +39,17 @@ from world_cup_2026_simulator import (
     NEXT_ROUNDS,
     ROUND_OF_32_TEMPLATE,
     STADIUMS,
+    DEFAULT_GROUP_REST_DAYS,
+    DEFAULT_KNOCKOUT_REST_DAYS,
+    MatchContext,
     Team,
     assign_third_place_teams,
+    calculate_travel_fatigue,
+    clamp,
     create_teams,
     group_stage_fixtures,
     knockout_context,
+    update_team_travel_state,
 )
 
 
@@ -733,6 +739,8 @@ def simulate_trained_match(
     rng: np.random.Generator,
     allow_draw: bool,
     xg_cache: dict[tuple[str, str, str, str], tuple[float, float]] | None = None,
+    context: MatchContext | None = None,
+    fallback_rest_days: int = DEFAULT_GROUP_REST_DAYS,
 ) -> tuple[int, int, Team | None, Team | None, str]:
     cache_key = (team_1.name, team_2.name, str(match_date.date()), country)
     if xg_cache is not None and cache_key in xg_cache:
@@ -741,9 +749,20 @@ def simulate_trained_match(
         lambda_1, lambda_2 = trained_expected_goals(home_model, away_model, states, team_1, team_2, match_date, country)
         if xg_cache is not None:
             xg_cache[cache_key] = (lambda_1, lambda_2)
+
+    if context is not None:
+        factors_1 = calculate_travel_fatigue(team_1, context, fallback_rest_days)
+        factors_2 = calculate_travel_fatigue(team_2, context, fallback_rest_days)
+        lambda_1 *= clamp(1.0 - 0.10 * factors_1.travel_fatigue_score, 0.90, 1.0)
+        lambda_2 *= clamp(1.0 - 0.10 * factors_2.travel_fatigue_score, 0.90, 1.0)
+
     goals_1 = int(rng.poisson(lambda_1))
     goals_2 = int(rng.poisson(lambda_2))
     decided_by = "normal_time"
+
+    if context is not None:
+        update_team_travel_state(team_1, context)
+        update_team_travel_state(team_2, context)
 
     if goals_1 == goals_2 and allow_draw:
         return goals_1, goals_2, None, None, "draw"
@@ -823,6 +842,8 @@ def run_trained_world_cup_monte_carlo(home_model: Pipeline, away_model: Pipeline
                     rng,
                     allow_draw=True,
                     xg_cache=xg_cache,
+                    context=context,
+                    fallback_rest_days=DEFAULT_GROUP_REST_DAYS,
                 )
                 table[team_1.name]["goals_for"] += goals_1
                 table[team_1.name]["goals_against"] += goals_2
@@ -877,6 +898,8 @@ def run_trained_world_cup_monte_carlo(home_model: Pipeline, away_model: Pipeline
                 rng,
                 allow_draw=False,
                 xg_cache=xg_cache,
+                context=context,
+                fallback_rest_days=DEFAULT_KNOCKOUT_REST_DAYS,
             )
             winners[match_id] = winner
             losers[match_id] = loser
@@ -900,39 +923,48 @@ def run_trained_world_cup_monte_carlo(home_model: Pipeline, away_model: Pipeline
                     pd.Timestamp(context.match_date),
                     context.stadium.country,
                     rng,
-                allow_draw=False,
-                xg_cache=xg_cache,
-            )
+                    allow_draw=False,
+                    xg_cache=xg_cache,
+                    context=context,
+                    fallback_rest_days=DEFAULT_KNOCKOUT_REST_DAYS,
+                )
                 winners[match_id] = winner
                 losers[match_id] = loser
                 counters[winner.name][counter_name] += 1
                 context_index += 1
 
+        third_context = knockout_context(context_index)
         _, _, third, _, _ = simulate_trained_match(
             home_model,
             away_model,
             states,
             losers[101],
             losers[102],
-            pd.Timestamp("2026-07-18"),
-            "United States",
+            pd.Timestamp(third_context.match_date),
+            third_context.stadium.country,
             rng,
             allow_draw=False,
             xg_cache=xg_cache,
+            context=third_context,
+            fallback_rest_days=DEFAULT_KNOCKOUT_REST_DAYS,
         )
         counters[third.name]["Finish third"] += 1
+        context_index += 1
 
+        final_context = knockout_context(context_index)
         _, _, champion, runner_up, _ = simulate_trained_match(
             home_model,
             away_model,
             states,
             winners[101],
             winners[102],
-            pd.Timestamp("2026-07-19"),
-            "United States",
+            pd.Timestamp(final_context.match_date),
+            final_context.stadium.country,
             rng,
             allow_draw=False,
             xg_cache=xg_cache,
+            context=final_context,
+            fallback_rest_days=DEFAULT_KNOCKOUT_REST_DAYS,
         )
         counters[champion.name]["Win World Cup"] += 1
         counters[runner_up.name]["Finish runner-up"] += 1

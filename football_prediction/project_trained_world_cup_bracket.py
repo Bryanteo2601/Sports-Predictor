@@ -26,6 +26,8 @@ from trained_international_model import (
     train_models,
 )
 from world_cup_2026_simulator import (
+    DEFAULT_GROUP_REST_DAYS,
+    DEFAULT_KNOCKOUT_REST_DAYS,
     GROUPS,
     NEXT_ROUNDS,
     ROUND_OF_32_TEMPLATE,
@@ -100,6 +102,8 @@ def simulate_projection(home_model, away_model, states, n_simulations: int) -> p
                     rng,
                     allow_draw=True,
                     xg_cache=xg_cache,
+                    context=context,
+                    fallback_rest_days=DEFAULT_GROUP_REST_DAYS,
                 )
                 table[team_1.name]["goals_for"] += goals_1
                 table[team_1.name]["goals_against"] += goals_2
@@ -164,6 +168,8 @@ def simulate_projection(home_model, away_model, states, n_simulations: int) -> p
                 rng,
                 allow_draw=False,
                 xg_cache=xg_cache,
+                context=context,
+                fallback_rest_days=DEFAULT_KNOCKOUT_REST_DAYS,
             )
             winners[match_id] = winner
             losers[match_id] = loser
@@ -188,37 +194,46 @@ def simulate_projection(home_model, away_model, states, n_simulations: int) -> p
                     rng,
                     allow_draw=False,
                     xg_cache=xg_cache,
+                    context=context,
+                    fallback_rest_days=DEFAULT_KNOCKOUT_REST_DAYS,
                 )
                 winners[match_id] = winner
                 losers[match_id] = loser
                 counters[winner.name][counter_name] += 1
                 context_index += 1
 
+        third_context = knockout_context(context_index)
         _, _, third, _, _ = simulate_trained_match(
             home_model,
             away_model,
             states,
             losers[101],
             losers[102],
-            pd.Timestamp("2026-07-18"),
-            "United States",
+            pd.Timestamp(third_context.match_date),
+            third_context.stadium.country,
             rng,
             allow_draw=False,
             xg_cache=xg_cache,
+            context=third_context,
+            fallback_rest_days=DEFAULT_KNOCKOUT_REST_DAYS,
         )
         counters[third.name]["Finish third"] += 1
+        context_index += 1
 
+        final_context = knockout_context(context_index)
         _, _, champion, runner_up, _ = simulate_trained_match(
             home_model,
             away_model,
             states,
             winners[101],
             winners[102],
-            pd.Timestamp("2026-07-19"),
-            "United States",
+            pd.Timestamp(final_context.match_date),
+            final_context.stadium.country,
             rng,
             allow_draw=False,
             xg_cache=xg_cache,
+            context=final_context,
+            fallback_rest_days=DEFAULT_KNOCKOUT_REST_DAYS,
         )
         counters[champion.name]["Win World Cup"] += 1
         counters[runner_up.name]["Finish runner-up"] += 1
