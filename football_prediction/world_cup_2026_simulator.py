@@ -34,6 +34,9 @@ import pandas as pd
 
 OUTPUT_DIR = Path("outputs")
 OUTPUT_DIR.mkdir(exist_ok=True)
+DATA_DIR = Path("data")
+BASE_CAMPS_PATH = DATA_DIR / "world_cup_2026_team_base_camps.csv"
+MATCH_SCHEDULE_PATH = DATA_DIR / "world_cup_2026_match_schedule.csv"
 
 RANDOM_SEED = 42
 BASE_XG = 1.35
@@ -379,6 +382,69 @@ KNOCKOUT_STADIUM_ROTATION = [
 ]
 
 
+def load_wikipedia_base_camps() -> dict[str, tuple[str, str, float, float]]:
+    if not BASE_CAMPS_PATH.exists():
+        return {}
+    camps = pd.read_csv(BASE_CAMPS_PATH)
+    return {
+        str(row["team"]): (
+            str(row["base_city"]),
+            str(row["base_country"]),
+            float(row["base_latitude"]),
+            float(row["base_longitude"]),
+        )
+        for _, row in camps.dropna(subset=["base_latitude", "base_longitude"]).iterrows()
+    }
+
+
+def load_wikipedia_match_schedule() -> pd.DataFrame:
+    if not MATCH_SCHEDULE_PATH.exists():
+        return pd.DataFrame()
+    return pd.read_csv(MATCH_SCHEDULE_PATH)
+
+
+def stadium_from_schedule_row(row: pd.Series) -> Stadium:
+    return Stadium(
+        name=str(row["stadium"]),
+        city=str(row["venue_city"]),
+        country=str(row["venue_country"]),
+        latitude=float(row["venue_latitude"]),
+        longitude=float(row["venue_longitude"]),
+    )
+
+
+def match_context_from_schedule(match_id: int) -> MatchContext | None:
+    schedule = load_wikipedia_match_schedule()
+    if schedule.empty:
+        return None
+    row = schedule[schedule["match_id"].eq(match_id)]
+    if row.empty:
+        return None
+    match = row.iloc[0]
+    return MatchContext(stadium=stadium_from_schedule_row(match), match_date=pd.to_datetime(match["date"]).date())
+
+
+def group_stage_fixtures(group: str) -> list[tuple[int, str, str, MatchContext]]:
+    schedule = load_wikipedia_match_schedule()
+    if schedule.empty:
+        return []
+    group_teams = set(GROUPS[group])
+    fixtures = []
+    for _, row in schedule[schedule["match_id"].le(72)].sort_values("match_id").iterrows():
+        home_team = str(row["home_team"])
+        away_team = str(row["away_team"])
+        if home_team in group_teams and away_team in group_teams:
+            fixtures.append(
+                (
+                    int(row["match_id"]),
+                    home_team,
+                    away_team,
+                    MatchContext(stadium=stadium_from_schedule_row(row), match_date=pd.to_datetime(row["date"]).date()),
+                )
+            )
+    return fixtures
+
+
 ROUND_OF_32_TEMPLATE = [
     (73, "2A", "2B"),
     (74, "1E", "3:A/B/C/D/F"),
@@ -643,9 +709,10 @@ def create_teams() -> list[Team]:
     teams = []
     market_probabilities = no_vig_market_probabilities()
     market_scores = market_strength_scores()
+    wikipedia_base_camps = load_wikipedia_base_camps()
     for group, team_names in GROUPS.items():
-        base_city, base_country, base_latitude, base_longitude = BASE_CAMPS[group]
         for name in team_names:
+            base_city, base_country, base_latitude, base_longitude = wikipedia_base_camps.get(name, BASE_CAMPS[group])
             (
                 confederation,
                 attack,
@@ -844,20 +911,37 @@ def simulate_group_stage(groups: dict[str, list[Team]], rng: np.random.Generator
 
     for group, teams in groups.items():
         standings = {team.name: GroupStanding(team=team) for team in teams}
-        for match_number, (team_1, team_2) in enumerate(itertools.combinations(teams, 2)):
+        official_fixtures = group_stage_fixtures(group)
+        if official_fixtures:
+            fixture_rows = [
+                (
+                    scheduled_match_id,
+                    next(team for team in teams if team.name == team_1_name),
+                    next(team for team in teams if team.name == team_2_name),
+                    context,
+                )
+                for scheduled_match_id, team_1_name, team_2_name, context in official_fixtures
+            ]
+        else:
+            fixture_rows = [
+                (match_id + match_number, team_1, team_2, group_match_context(group, match_number))
+                for match_number, (team_1, team_2) in enumerate(itertools.combinations(teams, 2))
+            ]
+
+        for scheduled_match_id, team_1, team_2, context in fixture_rows:
             result = simulate_match(
                 team_1,
                 team_2,
-                match_id=match_id,
+                match_id=scheduled_match_id,
                 stage=f"Group {group}",
-                context=group_match_context(group, match_number),
+                context=context,
                 rng=rng,
                 allow_draws=True,
                 fallback_rest_days=DEFAULT_GROUP_REST_DAYS,
             )
             update_standings(standings, result)
             group_results.append(result)
-            match_id += 1
+            match_id = max(match_id, scheduled_match_id + 1)
 
         ranked = rank_group(standings)
         group_standings[group] = ranked
@@ -898,6 +982,9 @@ def build_round_of_32(qualified: dict[str, Team | list[GroupStanding]]) -> list[
 
 
 def knockout_context(index: int) -> MatchContext:
+    scheduled_context = match_context_from_schedule(73 + index)
+    if scheduled_context is not None:
+        return scheduled_context
     city = KNOCKOUT_STADIUM_ROTATION[index % len(KNOCKOUT_STADIUM_ROTATION)]
     return MatchContext(stadium=STADIUMS[city], match_date=date(2026, 6, 28) + timedelta(days=index * 2))
 
@@ -927,7 +1014,7 @@ def simulate_knockout_stage(round_of_32_fixtures: list[tuple[int, Team, Team]], 
     results.append(third_place_result)
     context_index += 1
 
-    final_result = simulate_match(winners[101], winners[102], 104, "Final", MatchContext(STADIUMS["New York/New Jersey"], date(2026, 7, 19)), rng, False, DEFAULT_KNOCKOUT_REST_DAYS)
+    final_result = simulate_match(winners[101], winners[102], 104, "Final", knockout_context(context_index), rng, False, DEFAULT_KNOCKOUT_REST_DAYS)
     results.append(final_result)
 
     champion = teams_by_name[final_result.winner]  # type: ignore[index]

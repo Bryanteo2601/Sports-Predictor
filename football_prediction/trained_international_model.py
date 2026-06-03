@@ -42,6 +42,7 @@ from world_cup_2026_simulator import (
     Team,
     assign_third_place_teams,
     create_teams,
+    group_stage_fixtures,
     knockout_context,
 )
 
@@ -791,19 +792,34 @@ def run_trained_world_cup_monte_carlo(home_model: Pipeline, away_model: Pipeline
                 name: {"points": 0, "goals_for": 0, "goals_against": 0}
                 for name in names
             }
-            for idx, (team_1_name, team_2_name) in enumerate([(a, b) for i, a in enumerate(names) for b in names[i + 1 :]]):
+            official_fixtures = group_stage_fixtures(group)
+            fixture_rows = official_fixtures or [
+                (
+                    idx + 1,
+                    team_1_name,
+                    team_2_name,
+                    type(
+                        "Context",
+                        (),
+                        {
+                            "stadium": list(STADIUMS.values())[(ord(group) - ord("A") + idx) % len(STADIUMS)],
+                            "match_date": date(2026, 6, 11) + timedelta(days=idx * 3),
+                        },
+                    )(),
+                )
+                for idx, (team_1_name, team_2_name) in enumerate([(a, b) for i, a in enumerate(names) for b in names[i + 1 :]])
+            ]
+            for _, team_1_name, team_2_name, context in fixture_rows:
                 team_1 = teams[team_1_name]
                 team_2 = teams[team_2_name]
-                stadium = list(STADIUMS.values())[(ord(group) - ord("A") + idx) % len(STADIUMS)]
-                match_date = pd.Timestamp(date(2026, 6, 11) + timedelta(days=idx * 3))
                 goals_1, goals_2, _, _, _ = simulate_trained_match(
                     home_model,
                     away_model,
                     states,
                     team_1,
                     team_2,
-                    match_date,
-                    stadium.country,
+                    pd.Timestamp(context.match_date),
+                    context.stadium.country,
                     rng,
                     allow_draw=True,
                     xg_cache=xg_cache,
